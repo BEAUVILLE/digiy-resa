@@ -440,17 +440,83 @@
         </div>
     </section>
 
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+
     <script>
+    // Attendre Firebase
+    function waitForFirebase(callback) {
+        let attempts = 0;
+        const check = setInterval(() => {
+            attempts++;
+            if (typeof firebase !== 'undefined') {
+                clearInterval(check);
+                callback(true);
+            } else if (attempts >= 30) {
+                clearInterval(check);
+                callback(false);
+            }
+        }, 100);
+    }
+
+    waitForFirebase((available) => {
+        initApp(available);
+    });
+
+    function initApp(firebaseAvailable) {
     // ===== CONFIG =====
+    const firebaseConfig = {
+        apiKey: "AIzaSyBqEQWoE2iC7_rp-u4riilNVHolcP2o0B0",
+        authDomain: "digiylyfe-ecosystem.firebaseapp.com",
+        databaseURL: "https://digiylyfe-ecosystem-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "digiylyfe-ecosystem",
+        storageBucket: "digiylyfe-ecosystem.firebasestorage.app",
+        messagingSenderId: "1007962643384",
+        appId: "1:1007962643384:web:20d26881e87f0dc37d0d"
+    };
+
     const urlParams = new URLSearchParams(window.location.search);
     const PARTNER_ID = urlParams.get('resto') || 'le-malraux';
     const WA_NUMBER = urlParams.get('wa') || '33638329423';
     const RESTO_EMAIL = urlParams.get('email') || 'digiylyfe@gmail.com';
     const RESTO_NAME = urlParams.get('name') || 'Le Malraux';
 
+    // Init Firebase
+    let db, firebaseReady = false;
+    
+    if (firebaseAvailable) {
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+            firebaseReady = true;
+            console.log('🔥 Firebase connecté');
+            updateStatus(true);
+        } catch(e) {
+            console.warn('⚠️ Firebase error:', e);
+            updateStatus(false);
+        }
+    } else {
+        console.warn('⚠️ Firebase non disponible');
+        updateStatus(false);
+    }
+
+    function updateStatus(connected) {
+        const badge = document.querySelector('.status-badge');
+        const text = document.getElementById('statusText');
+        const dot = badge.querySelector('.dot');
+        
+        if (connected) {
+            text.textContent = '🔥 ' + PARTNER_ID;
+            dot.style.background = '#16a34a';
+        } else {
+            text.textContent = '⚠️ ' + PARTNER_ID;
+            dot.style.background = '#dc2626';
+        }
+    }
+
     // Update resto name
     document.getElementById('restoName').textContent = RESTO_NAME;
-    document.getElementById('statusText').textContent = PARTNER_ID;
 
     // ===== FORM LOGIC =====
     const form = document.getElementById('reservationForm');
@@ -497,7 +563,7 @@
     }
 
     // Submit
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
         
         if (!form.checkValidity()) {
@@ -523,12 +589,29 @@
             email: fd.get('email'),
             restaurant: PARTNER_ID,
             restoName: RESTO_NAME,
-            createdAt: new Date().toISOString()
+            source: 'DIGIY_RESA',
+            status: 'pending',
+            createdAt: Date.now(),
+            createdAtISO: new Date().toISOString()
         };
 
         console.log('📝 Réservation:', reservationData);
 
-        // Save to localStorage as backup
+        // Save to Firebase
+        let firebaseSuccess = false;
+        if (firebaseReady) {
+            try {
+                const path = `/${PARTNER_ID}/resto/reservations`;
+                const ref = db.ref(path).push();
+                await ref.set(reservationData);
+                console.log('✅ Firebase sync OK:', ref.key);
+                firebaseSuccess = true;
+            } catch(err) {
+                console.error('❌ Firebase error:', err);
+            }
+        }
+
+        // Backup localStorage
         const savedResas = JSON.parse(localStorage.getItem('digiy_reservations') || '[]');
         savedResas.push(reservationData);
         localStorage.setItem('digiy_reservations', JSON.stringify(savedResas));
@@ -542,6 +625,7 @@
             `• Nom: ${fd.get('nom')}\n` +
             `• Tel: ${fd.get('whatsapp')}\n` +
             `• Email: ${fd.get('email')}\n\n` +
+            `${firebaseSuccess ? '✅ Synchronisée Firebase\n' : '⚠️ Locale uniquement\n'}` +
             `⏱️ Envoyé: ${new Date().toLocaleString('fr-FR')}`;
 
         const mailtoLink = `mailto:${RESTO_EMAIL}?subject=${encodeURIComponent('Réservation ' + RESTO_NAME + ' - ' + fd.get('nom'))}&body=${encodeURIComponent(message)}`;
@@ -565,10 +649,11 @@
                     <h3>Réservation Confirmée !</h3>
                     <div class="info-box">
                         <p style="color:var(--digiy-green);font-weight:700;margin-bottom:10px;">
-                            Un responsable du ${RESTO_NAME} vous recontactera rapidement.
+                            ${firebaseSuccess ? '✅ Synchronisée avec le restaurant' : '⚠️ Envoyée par email/WhatsApp'}
                         </p>
                         <p style="color:#B0B0B0;font-size:0.9rem;">
-                            Vérifiez votre <strong>email</strong> et <strong>WhatsApp</strong> pour la confirmation.
+                            Un responsable du ${RESTO_NAME} vous recontactera rapidement.<br>
+                            Vérifiez votre <strong>email</strong> et <strong>WhatsApp</strong>.
                         </p>
                     </div>
                     <p style="margin:20px 0;color:var(--digiy-text-light);">
@@ -591,6 +676,8 @@
         setMinDate();
         updateZoneStatus();
     });
+
+    } // End initApp
     </script>
 </body>
 </html>
